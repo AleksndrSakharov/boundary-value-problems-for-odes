@@ -9,16 +9,13 @@
 #include <iomanip>
 
 namespace {
-    const double xi = 1.0 / std::sqrt(3.0);
-    const double mu1 = 2.0;
-    const double mu2 = 1.0;
-
-    double k(double x) { return (x <= xi) ? 1.0 : std::exp(x * x); }
-    double q(double x) { return (x <= xi) ? (x * x) : (1.0 + x * x * x * x); }
-    double f(double x) { return (x <= xi) ? (x * x - 1.0) : 1.0; }
+    // ЗАМЕЧАНИЕ 4: k, q, f оставлены для варианта 8, но xi теперь передается параметром
+    double k(double x, double xi) { return (x <= xi) ? 1.0 : std::exp(x * x); }
+    double q(double x, double xi) { return (x <= xi) ? (x * x) : (1.0 + x * x * x * x); }
+    double f(double x, double xi) { return (x <= xi) ? (x * x - 1.0) : 1.0; }
 
     template <typename Func>
-    double integrate(Func func, double a, double b, int steps = 200) {
+    double integrate(Func func, double a, double b, double xi, int steps = 200) {
         auto do_int = [&](double start, double end) {
             if (start >= end) return 0.0;
             double h = (end - start) / steps;
@@ -34,8 +31,9 @@ namespace {
         }
         return do_int(a, b);
     }
-    std::vector<double> solveGrid(int n) {
-        if (n < 2) n = 2;
+
+    // ЗАМЕЧАНИЕ 4: Передаем параметры xi, mu1, mu2 из VariantData
+    std::vector<double> solveGrid(int n, double xi, double mu1, double mu2) {
         double h = 1.0 / n;
         int N = n - 1;
         
@@ -44,15 +42,17 @@ namespace {
         std::vector<double> upper(std::max(0, N - 1), 0.0);
         std::vector<double> rhs(N, 0.0);
 
-        auto inv_k = [](double x) { return 1.0 / k(x); };
+        auto inv_k = [xi](double x) { return 1.0 / k(x, xi); };
+        auto bind_q = [xi](double x) { return q(x, xi); };
+        auto bind_f = [xi](double x) { return f(x, xi); };
 
         for (int i = 1; i <= N; ++i) {
             double x_i = i * h;
 
-            double a_i   = h / integrate(inv_k, x_i - h, x_i);
-            double a_ip1 = h / integrate(inv_k, x_i, x_i + h);
-            double d_i   = integrate(q, x_i - h / 2.0, x_i + h / 2.0) / h;
-            double phi_i = integrate(f, x_i - h / 2.0, x_i + h / 2.0) / h;
+            double a_i   = h / integrate(inv_k, x_i - h, x_i, xi);
+            double a_ip1 = h / integrate(inv_k, x_i, x_i + h, xi);
+            double d_i   = integrate(bind_q, x_i - h / 2.0, x_i + h / 2.0, xi) / h;
+            double phi_i = integrate(bind_f, x_i - h / 2.0, x_i + h / 2.0, xi) / h;
 
             double A_i = a_i / h;
             double B_i = a_ip1 / h;
@@ -81,7 +81,7 @@ namespace {
     }
 }
 
-TaskResult runFirstDirichletMainTask(const InputData& input, const VariantData& /*variant*/) {
+TaskResult runFirstDirichletMainTask(const InputData& input, const VariantData& variant) {
     TaskResult task = makeTaskStub(
         "first-dirichlet-main",
         "Первая краевая основная задача",
@@ -91,22 +91,23 @@ TaskResult runFirstDirichletMainTask(const InputData& input, const VariantData& 
         "Исполнитель 2",
         makeMainTaskColumns()
     );
-
-    int n = input.segments;
+    int n = std::max(2, input.segments);
     int mult = std::max(2, input.refinementMultiplier);
     
+    double xi = variant.xi;
+    double mu1 = variant.mu1;
+    double mu2 = variant.mu2;
+
     std::vector<double> v;
     std::vector<double> v2;
     double max_diff = 0.0;
-    double prev_max_diff = 0.0; 
     double max_x = 0.0;
     int max_i = 0;
 
-    while (n * mult <= input.maxSegments) {
-        v = solveGrid(n);
-        v2 = solveGrid(n * mult);
+    while (true) {
+        v = solveGrid(n, xi, mu1, mu2);
+        v2 = solveGrid(n * mult, xi, mu1, mu2);
 
-        prev_max_diff = max_diff;
         max_diff = 0.0;
         max_x = 0.0;
         max_i = 0;
@@ -123,23 +124,34 @@ TaskResult runFirstDirichletMainTask(const InputData& input, const VariantData& 
         if (max_diff <= input.tolerance) {
             break;
         }
-        
+    
         if (n * mult >= input.maxSegments) {
             break;
         }
+        
         n *= mult;
     }
+    bool accuracy_achieved = (max_diff <= input.tolerance);
 
     std::ostringstream noteStr;
-     noteStr << "Для решения задачи использована равномерная сетка с числом разбиений n = " << n << ";\n"
+    noteStr << "Для решения задачи использована равномерная сетка с числом разбиений n = " << n << ";\n"
             << "задача должна быть решена с заданной точностью ε = " 
-            << std::scientific << std::setprecision(1) << input.tolerance << ";\n"
-            << "задача решена с точностью ε2 = " 
-            << std::scientific << std::setprecision(3) << max_diff << ";\n"
-            << "максимальная разность численных решений в общих узлах сетки наблюдается в точке x = " 
+            << std::scientific << std::setprecision(1) << input.tolerance << ";\n";
+            
+    if (accuracy_achieved) {
+        noteStr << "задача решена с точностью ε2 = " 
+                << std::scientific << std::setprecision(3) << max_diff << ";\n";
+        task.status = "done";
+    } else {
+        noteStr << "заданная точность НЕ достигнута (остановка по maxSegments). Текущая ε2 = " 
+                << std::scientific << std::setprecision(3) << max_diff << ";\n";
+        task.status = "warning";
+    }
+
+    noteStr << "максимальная разность численных решений в общих узлах сетки наблюдается в точке x = " 
             << std::fixed << std::setprecision(5) << max_x << " в узле i = " << max_i << ".\n\n";
+
     task.note = noteStr.str();
-    task.status = "done";
 
     for (int i = 0; i <= n; i += input.tableStride) {
         TableRow row;
