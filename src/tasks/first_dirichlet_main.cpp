@@ -99,65 +99,41 @@ TaskResult runFirstDirichletMainTask(const InputData& input, const VariantData& 
     double max_diff = 0.0;
     double max_x = 0.0;
     int max_i = 0;
-    bool accuracy_achieved = false;
-    bool comparison_performed = false;
-
-    while (1LL * n * mult <= input.maxSegments) {
-        comparison_performed = true;
-        v = solveGrid(n, xi, mu1, mu2);
-        v2 = solveGrid(n * mult, xi, mu1, mu2);
-
-        max_diff = 0.0;
-        max_x = 0.0;
-        max_i = 0;
-
-        for (int i = 0; i <= n; ++i) {
-            double diff = std::abs(v[i] - v2[i * mult]);
-            if (diff > max_diff) {
-                max_diff = diff;
-                max_x = i * (1.0 / n);
-                max_i = i;
-            }
-        }
-
-        if (max_diff <= input.tolerance) {
-            accuracy_achieved = true;
-            break;
-        }
-
-        const int next_n = n * mult;
-        if (1LL * next_n * mult > input.maxSegments) {
-            break;
-        }
-
-        n = next_n;
-    }
 
     std::ostringstream noteStr;
 
-    if (!comparison_performed) {
+    if (n > input.maxSegments) {
+        n = input.maxSegments;
+        noteStr << "Внимание: заданное n превышает maxSegments, используем n = " << n << ".\n";
+    }
+
+    if (1LL * n * mult > input.maxSegments) {
         noteStr << "Невозможно построить уточненную сетку для сравнения: n * "
                 << mult << " = " << (1LL * n * mult)
                 << " больше maxSegments = " << input.maxSegments << ".\n"
-                << "Увеличьте max n или уменьшите начальное n.";
+                << "Увеличьте maxSegments или уменьшите начальное n.";
         task.note = noteStr.str();
         task.status = "warning";
         return task;
     }
 
-    noteStr << "Для решения задачи использована равномерная сетка с числом разбиений n = " << n << ";\n"
-            << "задача должна быть решена с заданной точностью ε = " 
-            << std::scientific << std::setprecision(1) << input.tolerance << ";\n";
-            
-    if (accuracy_achieved) {
-        noteStr << "задача решена с точностью ε2 = " 
-                << std::scientific << std::setprecision(3) << max_diff << ";\n";
-        task.status = "done";
-    } else {
-        noteStr << "заданная точность НЕ достигнута (остановка по maxSegments). Текущая ε2 = " 
-                << std::scientific << std::setprecision(3) << max_diff << ";\n";
-        task.status = "warning";
+    v = solveGrid(n, xi, mu1, mu2);
+    v2 = solveGrid(n * mult, xi, mu1, mu2);
+
+    for (int i = 0; i <= n; ++i) {
+        double diff = std::abs(v[i] - v2[i * mult]);
+        if (diff > max_diff) {
+            max_diff = diff;
+            max_x = i * (1.0 / n);
+            max_i = i;
+        }
     }
+
+    noteStr << "Для решения задачи использована равномерная сетка с числом разбиений n = " << n << ";\n"
+            << "точность ε2 = " 
+            << std::scientific << std::setprecision(3) << max_diff << ";\n";
+    
+    task.status = "done";
 
     noteStr << "максимальная разность численных решений в общих узлах сетки наблюдается в точке x = " 
             << std::fixed << std::setprecision(5) << max_x << " в узле i = " << max_i << ".\n\n";

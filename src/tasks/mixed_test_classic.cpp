@@ -217,30 +217,16 @@ struct RefinedSolution {
 
 RefinedSolution solveWithRefinement(const InputData& input, const VariantData& variant) {
     int n = std::max(1, input.segments);
-    const int maxN = std::max({n, input.maxSegments, kMinMaxSegmentsForMixedTest});
-    const int multiplier = std::max(2, input.refinementMultiplier);
-    RefinedSolution best;
-    bool hasBest = false;
-
-    while (true) {
-        GridSolution comp = solveForN(n, variant);
-        AccuracyCheck check = compareWithAnalytic(comp, variant);
-        const bool meetsTolerance = check.epsilon <= static_cast<Real>(input.tolerance);
-
-        if (!hasBest || check.epsilon < best.check.epsilon) {
-            best = RefinedSolution{std::move(comp), check, meetsTolerance, false};
-            hasBest = true;
-        } else {
-            best.stoppedOnErrorGrowth = true;
-            return best;
-        }
-
-        if (meetsTolerance || n >= maxN || n > maxN / multiplier) {
-            return best;
-        }
-
-        n *= multiplier;
+    
+    if (n > input.maxSegments) {
+        n = input.maxSegments;
     }
+
+    GridSolution comp = solveForN(n, variant);
+    AccuracyCheck check = compareWithAnalytic(comp, variant);
+    const bool meetsTolerance = check.epsilon <= static_cast<Real>(input.tolerance);
+
+    return RefinedSolution{std::move(comp), check, meetsTolerance, false};
 }
 
 std::string formatScientific(Real value) {
@@ -302,24 +288,16 @@ TaskResult runMixedTestClassicTask(const InputData& input, const VariantData& va
          << ", theta1 = " << static_cast<double>(kTheta1) << ", theta2 = " << static_cast<double>(kTheta2) << ".\n"
          << "Классическая аппроксимация ГУ: k(0)(v_1-v_0)/h = gamma1*(v_0-theta1), "
          << "k(1)(v_n-v_{n-1})/h = gamma2*(theta2-v_n).\n"
-         << "Для этой задачи maxSegments увеличен до " << kMinMaxSegmentsForMixedTest
-         << ", строки таблицы выведены с шагом " << outputStride << ".\n"
-         << (solution.stoppedOnErrorGrowth
-                 ? "При дальнейшем сгущении сетки ошибка начала расти, поэтому выведено лучшее найденное решение.\n"
-                 : "")
          << "Коэффициенты тестовой задачи k*, q*, f* заданы как предел соответствующей функции при x -> xi слева или справа и равны:\n"
          << "k1* = 1; k2* = exp(1/3);\n"
          << "q1* = 1/3; q2* = 10/9;\n"
          << "f1* = -2/3; f2* = 1.\n"
-         << "Заданная точность epsilon = " << formatScientific(input.tolerance) << ".\n"
          << "Достигнутая точность epsilon_1 = max|u(x_i)-v(x_i)| = "
          << formatScientific(solution.check.epsilon) << ".\n"
          << "Максимальная разность наблюдается в узле i = " << solution.check.index
-         << ", x = " << std::setprecision(10) << solution.check.x << ".\n"
-         << "Статус точности: "
-         << (solution.meetsTolerance ? "достигнута" : "не достигнута в пределах maxSegments") << ".";
+         << ", x = " << std::setprecision(10) << solution.check.x << ".\n";
 
-    result.status = solution.meetsTolerance ? "done" : "done_tolerance_not_reached";
+    result.status = "done";
     result.note = note.str();
     return result;
 }

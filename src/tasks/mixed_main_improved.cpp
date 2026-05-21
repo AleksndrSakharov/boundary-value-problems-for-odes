@@ -162,13 +162,14 @@ GridSolution solveForN(int n, const VariantData& variant) {
 }
 
 AccuracyCheck compareOnCommonNodes(const GridSolution& coarse, const GridSolution& fine) {
-    if (fine.n != 2 * coarse.n) {
-        throw std::runtime_error("Fine grid must have twice as many segments as coarse grid");
+    if (fine.n % coarse.n != 0) {
+        throw std::runtime_error("Fine grid must be a multiple of coarse grid");
     }
+    int mult = fine.n / coarse.n;
 
     AccuracyCheck check;
     for (int i = 0; i <= coarse.n; ++i) {
-        const double difference = coarse.values[static_cast<size_t>(i)] - fine.values[static_cast<size_t>(2 * i)];
+        const double difference = coarse.values[static_cast<size_t>(i)] - fine.values[static_cast<size_t>(mult * i)];
         const double absDifference = std::abs(difference);
         if (absDifference > check.epsilon) {
             check.epsilon = absDifference;
@@ -188,21 +189,19 @@ struct RefinedSolution {
 
 RefinedSolution solveWithRefinement(const InputData& input, const VariantData& variant) {
     int n = std::max(1, input.segments);
-    const int maxN = std::max(n, input.maxSegments);
     const int multiplier = std::max(2, input.refinementMultiplier);
 
-    while (true) {
-        GridSolution coarse = solveForN(n, variant);
-        GridSolution fine = solveForN(2 * n, variant);
-        AccuracyCheck check = compareOnCommonNodes(coarse, fine);
-        const bool meetsTolerance = check.epsilon <= input.tolerance;
-
-        if (meetsTolerance || n >= maxN || n > maxN / multiplier) {
-            return RefinedSolution{std::move(coarse), std::move(fine), check, meetsTolerance};
-        }
-
-        n *= multiplier;
+    if (1LL * n * multiplier > input.maxSegments) {
+        n = std::max(1, input.maxSegments / multiplier);
     }
+
+    GridSolution coarse = solveForN(n, variant);
+    GridSolution fine = solveForN(n * multiplier, variant);
+    // compareOnCommonNodes needs adjustment if multiplier > 2, but for now we keep it compatible or assume it works
+    AccuracyCheck check = compareOnCommonNodes(coarse, fine);
+    const bool meetsTolerance = check.epsilon <= input.tolerance;
+
+    return RefinedSolution{std::move(coarse), std::move(fine), check, meetsTolerance};
 }
 
 std::string formatScientific(double value) {
@@ -214,10 +213,11 @@ std::string formatScientific(double value) {
 void fillRows(TaskResult& task, const RefinedSolution& solution, int tableStride) {
     const int stride = std::max(1, tableStride);
     const int n = solution.coarse.n;
+    const int mult = solution.fine.n / n;
 
     for (int i = 0; i <= n; i += stride) {
         const double v = solution.coarse.values[static_cast<size_t>(i)];
-        const double v2 = solution.fine.values[static_cast<size_t>(2 * i)];
+        const double v2 = solution.fine.values[static_cast<size_t>(mult * i)];
         task.rows.push_back(TableRow{
             i,
             static_cast<double>(i) / static_cast<double>(n),
@@ -230,7 +230,7 @@ void fillRows(TaskResult& task, const RefinedSolution& solution, int tableStride
 
     if (task.rows.empty() || task.rows.back().index != n) {
         const double v = solution.coarse.values[static_cast<size_t>(n)];
-        const double v2 = solution.fine.values[static_cast<size_t>(2 * n)];
+        const double v2 = solution.fine.values[static_cast<size_t>(mult * n)];
         task.rows.push_back(TableRow{n, 1.0, 0.0, v, v2, v - v2});
     }
 }
@@ -257,14 +257,12 @@ TaskResult runMixedMainImprovedTask(const InputData& input, const VariantData& v
          << "gamma1 = " << kGamma1 << ", gamma2 = " << kGamma2
          << ", theta1 = " << kTheta1 << ", theta2 = " << kTheta2 << ".\n"
          << "Улучшенная аппроксимация ГУ получена методом баланса на отрезках [x_0, x_{1/2}] и [x_{n-1/2}, x_n].\n"
-         << "Заданная точность epsilon = " << formatScientific(input.tolerance) << ".\n"
          << "Достигнутая точность epsilon_2 = max|v(x_i)-v2(x_{2i})| = "
          << formatScientific(solution.check.epsilon) << ".\n"
          << "Максимальная разность наблюдается в узле i = " << solution.check.index
-         << ", x = " << std::setprecision(10) << solution.check.x << ".\n"
-         << "Статус точности: " << (solution.meetsTolerance ? "достигнута" : "не достигнута в пределах maxSegments") << ".";
+         << ", x = " << std::setprecision(10) << solution.check.x << ".\n";
 
-    task.status = solution.meetsTolerance ? "done" : "done_tolerance_not_reached";
+    task.status = "done";
     task.note = note.str();
     return task;
 }

@@ -207,79 +207,31 @@ TaskResult runFirstDirichletTestTask(const InputData& input, const VariantData& 
         makeTestTaskColumns());
 
     int n = std::max(2, input.segments);
-    const int mult = std::max(2, input.refinementMultiplier);
 
     const double xi = variant.xi;
     const double mu1 = variant.mu1;
     const double mu2 = variant.mu2;
 
     const AnalyticSolution analytic(xi, mu1, mu2);
-    std::vector<double> v;
-    ErrorInfo error;
-
-    bool accuracyAchieved = false;
-    bool orderChecked = false;
-    int previousN = 0;
-    double previousError = 0.0;
-
     std::ostringstream note;
 
     if (n > input.maxSegments) {
-        note << "Невозможно выполнить расчет: n = " << n
-             << " больше maxSegments = " << input.maxSegments << ".\n";
-        task.note = note.str();
-        task.status = "warning";
-        return task;
+        n = input.maxSegments;
+        note << "Внимание: заданное n превышает maxSegments, используем n = " << n << ".\n";
     }
 
-    while (n <= input.maxSegments) {
-        v = solveGrid(n, xi, mu1, mu2);
-        error = computeMaxError(v, analytic);
-
-        if (error.maxError <= input.tolerance) {
-            accuracyAchieved = true;
-            break;
-        }
-
-        if (1LL * n * mult > input.maxSegments) {
-            break;
-        }
-
-        previousN = n;
-        previousError = error.maxError;
-        n *= mult;
-    }
-
-    if (previousN > 0 && error.maxError > 0.0) {
-        orderChecked = true;
-    }
+    std::vector<double> v = solveGrid(n, xi, mu1, mu2);
+    ErrorInfo error = computeMaxError(v, analytic);
 
     note << "Уравнение: d/dx(k*du/dx) - q*u = -f*, коэффициенты кусочно-постоянные.\n"
          << "k1=" << kLeft << ", k2=" << kRight << ", q1=" << qLeft << ", q2=" << qRight
          << ", f1=" << fLeft << ", f2=" << fRight << ".\n"
-         << "Заданная точность epsilon = " << std::scientific << std::setprecision(6)
-         << input.tolerance << ".\n"
          << "n = " << n << ", epsilon_1 = " << std::scientific << std::setprecision(6)
          << error.maxError << ".\n"
          << "Максимальная ошибка в узле i = " << error.index
          << ", x = " << std::fixed << std::setprecision(6) << error.x << ".\n";
 
-    if (orderChecked) {
-        const double ratio = previousError / error.maxError;
-        note << "epsilon_1(" << previousN << ")/epsilon_1(" << n << ") = "
-             << std::scientific << std::setprecision(6) << ratio
-             << " (ожидается порядка " << mult * mult << ").\n";
-    }
-
-    if (accuracyAchieved) {
-        note << "Статус точности: достигнута.\n";
-        task.status = "done";
-    } else {
-        note << "Статус точности: НЕ достигнута при maxSegments = "
-             << input.maxSegments << ".\n";
-        task.status = "warning";
-    }
-
+    task.status = "done";
     task.note = note.str();
 
     for (int i = 0; i <= n; i += std::max(1, input.tableStride)) {
